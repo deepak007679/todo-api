@@ -62,7 +62,7 @@ app.get('/tasks/:id', (req, res) => {
   res.json(formatTask(task));
 });
 
-// Stage 2: Create new task backed by SQLite
+// Stage 2: Create new task
 app.post('/tasks', (req, res) => {
   const { title } = req.body;
   if (!title || typeof title !== 'string' || title.trim() === '') {
@@ -82,33 +82,49 @@ app.post('/tasks', (req, res) => {
   res.status(201).json(newTask);
 });
 
-// Remaining endpoints for next stages
-let tasks = [];
-
+// Stage 3: Update and delete endpoints
 app.put('/tasks/:id', (req, res) => {
-  const task = tasks.find(t => t.id === parseInt(req.params.id));
-  if (!task) {
+  const existing = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  if (!existing) {
     return res.status(404).json({ error: 'Task not found' });
   }
+
   const { title, done } = req.body;
+  if (title === undefined && done === undefined) {
+    return res.status(400).json({ error: 'At least one field (title or done) is required' });
+  }
+
+  let newTitle = existing.title;
   if (title !== undefined) {
-    if (title.trim() === '') {
+    if (typeof title !== 'string' || title.trim() === '') {
       return res.status(400).json({ error: 'Title cannot be empty' });
     }
-    task.title = title;
+    newTitle = title.trim();
   }
+
+  let newDone = existing.done;
   if (done !== undefined) {
-    task.done = done;
+    if (typeof done !== 'boolean' && done !== 0 && done !== 1) {
+      return res.status(400).json({ error: 'Done must be a boolean or 0/1' });
+    }
+    newDone = done ? 1 : 0;
   }
-  res.json(task);
+
+  const updateStmt = db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?');
+  updateStmt.run(newTitle, newDone, req.params.id);
+
+  const updatedTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
+  res.json(formatTask(updatedTask));
 });
 
 app.delete('/tasks/:id', (req, res) => {
-  const index = tasks.findIndex(t => t.id === parseInt(req.params.id));
-  if (index === -1) {
+  const deleteStmt = db.prepare('DELETE FROM tasks WHERE id = ?');
+  const info = deleteStmt.run(req.params.id);
+
+  if (info.changes === 0) {
     return res.status(404).json({ error: 'Task not found' });
   }
-  tasks.splice(index, 1);
+
   res.status(204).send();
 });
 
