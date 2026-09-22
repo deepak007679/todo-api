@@ -48,7 +48,7 @@ const formatTask = (task) => ({
   done: Boolean(task.done)
 });
 
-// Stage 1: Read endpoints backed by SQLite
+// Stage 1: Read endpoints
 app.get('/tasks', (req, res) => {
   const tasks = db.prepare('SELECT * FROM tasks').all();
   res.json(tasks.map(formatTask));
@@ -62,19 +62,28 @@ app.get('/tasks/:id', (req, res) => {
   res.json(formatTask(task));
 });
 
-// Remaining endpoints from Assignment 1 for now
-let tasks = [];
-let nextId = 4;
-
+// Stage 2: Create new task backed by SQLite
 app.post('/tasks', (req, res) => {
   const { title } = req.body;
-  if (!title || title.trim() === '') {
+  if (!title || typeof title !== 'string' || title.trim() === '') {
     return res.status(400).json({ error: 'Title is required' });
   }
-  const newTask = { id: nextId++, title, done: false };
-  tasks.push(newTask);
+
+  const trimmedTitle = title.trim();
+  const insertStmt = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
+  const info = insertStmt.run(trimmedTitle, 0);
+
+  const newTask = {
+    id: Number(info.lastInsertRowid),
+    title: trimmedTitle,
+    done: false
+  };
+
   res.status(201).json(newTask);
 });
+
+// Remaining endpoints for next stages
+let tasks = [];
 
 app.put('/tasks/:id', (req, res) => {
   const task = tasks.find(t => t.id === parseInt(req.params.id));
