@@ -1,0 +1,17 @@
+Move our in-memory Express CRUD API to SQLite using the better-sqlite3 library.
+
+Key Requirements:
+1. Use SQLite with better-sqlite3 storing data in a local file named tasks.db.
+2. Ensure the tasks table exists with columns: id (integer primary key), title (text not null), done (integer/boolean).
+3. If the tasks table is empty, seed 3 sample tasks:
+   - 'Buy milk' (done: false/0)
+   - 'Walk the dog' (done: true/1)
+   - 'Learn Express' (done: false/0)
+   Do not duplicate these sample tasks on subsequent server restarts.
+4. Implement all standard CRUD endpoints keeping the exact same request and response structure:
+   - GET /tasks: list all tasks
+   - GET /tasks/:id: return single task or 404 { error: 'Task not found' }
+   - POST /tasks: create task with title, returning 201 with created task; return 400 { error: 'Title is required' } if title missing or empty
+   - PUT /tasks/:id: update title and/or done status, returning updated task; return 404 if not found, 400 if invalid body
+   - DELETE /tasks/:id: delete task, returning 204 with empty body; return 404 if not found
+5. Always use parameterized queries for all SQL queries to prevent SQL injection.

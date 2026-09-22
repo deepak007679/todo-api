@@ -141,3 +141,49 @@ All write operations use **parameterized queries** (`?` placeholders) to prevent
 - **Storage as an Implementation Detail**: The client receives identical JSON responses and status codes as Assignment 1. Automated endpoint tests written for the in-memory API pass without changing a single line of test code, proving that underlying storage architecture does not leak into the public API contract.
 - **Indexes**: Added index `idx_tasks_done` on `tasks(done)` and `idx_tasks_title` on `tasks(title)` to accelerate `WHERE` filtering and `ORDER BY` sorting as the dataset scales.
 - **Atomic Transactions**: Seeding is enclosed in `db.transaction()` ensuring all-or-nothing execution, preventing partial database corruption.
+
+---
+
+## Stage 6: AI vs Me (Bonus AI Rematch)
+
+An AI assistant was prompted in quarantine (`ai-version/`) to perform the same memory-to-SQLite migration.
+
+### The Full Prompt Given to the AI
+
+```text
+Move our in-memory Express CRUD API to SQLite using the better-sqlite3 library.
+
+Key Requirements:
+1. Use SQLite with better-sqlite3 storing data in a local file named tasks.db.
+2. Ensure the tasks table exists with columns: id (integer primary key), title (text not null), done (integer/boolean).
+3. If the tasks table is empty, seed 3 sample tasks:
+   - 'Buy milk' (done: false/0)
+   - 'Walk the dog' (done: true/1)
+   - 'Learn Express' (done: false/0)
+   Do not duplicate these sample tasks on subsequent server restarts.
+4. Implement all standard CRUD endpoints keeping the exact same request and response structure:
+   - GET /tasks: list all tasks
+   - GET /tasks/:id: return single task or 404 { error: 'Task not found' }
+   - POST /tasks: create task with title, returning 201 with created task; return 400 { error: 'Title is required' } if title missing or empty
+   - PUT /tasks/:id: update title and/or done status, returning updated task; return 404 if not found, 400 if invalid body
+   - DELETE /tasks/:id: delete task, returning 204 with empty body; return 404 if not found
+5. Always use parameterized queries for all SQL queries to prevent SQL injection.
+```
+
+### Analysis & Diff Answers
+
+1. **What did it do better — and can you explain it?**
+   - **Cleaner DELETE Handling**: The AI ran `DELETE FROM tasks WHERE id = ?` immediately and checked `info.changes === 0` to return `404`. This avoids performing an unnecessary preliminary `SELECT` check before deleting, reducing database disk operations.
+2. **What did it get wrong or quietly ignore?**
+   - **Response Contract Violation (Integer vs Boolean)**: The AI returned SQLite rows directly (`done: 0` / `done: 1`) instead of maintaining the boolean contract (`done: false` / `done: true`) established in Assignment 1. Strict frontend clients or contract tests checking `typeof res.body[0].done === 'boolean'` would fail.
+   - **Missing Transaction Safety**: The AI inserted the three sample tasks with three sequential `insert.run()` calls rather than inside an atomic `db.transaction()`. If the process failed mid-seed, partial data could be written.
+   - **Lax Validation**: In `PUT /tasks/:id`, the AI did not check for whitespace-only titles (`title.trim() === ''`).
+3. **What did your prompt forget to specify — and what did the AI silently decide for you?**
+   - The prompt specified keeping the "exact same request and response structure", but did not explicitly emphasize that SQLite represents booleans as `0/1` and must be mapped back to JSON booleans upon serialization. The AI silently decided to return raw database columns as-is.
+   - The prompt did not specify transaction requirements or indexing.
+
+### Rematch & Prompt Improvement
+
+- **Improved Prompt**:
+  > *"Migrate the Express API to SQLite using `better-sqlite3`. Table schema: `id` (INTEGER PRIMARY KEY), `title` (TEXT NOT NULL), `done` (INTEGER NOT NULL DEFAULT 0). Wrap multi-row initial seeds in an atomic transaction. Format all API responses so `done` is mapped to an explicit JavaScript boolean (`true`/`false`) to preserve contract parity with Assignment 1. Add `.trim()` validation on title updates in PUT."*
+- **What Changed**: The improved prompt explicitly enforces schema typing, transaction safety, and response serialization rules, removing AI ambiguity and preventing subtle runtime contract bugs.
