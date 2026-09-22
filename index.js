@@ -41,25 +41,30 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// For Stage 0, existing endpoints
-let tasks = [
-  { id: 1, title: 'Buy milk', done: false },
-  { id: 2, title: 'Walk the dog', done: true },
-  { id: 3, title: 'Learn Express', done: false }
-];
-let nextId = 4;
+// Helper to format task ensuring boolean done property
+const formatTask = (task) => ({
+  id: task.id,
+  title: task.title,
+  done: Boolean(task.done)
+});
 
+// Stage 1: Read endpoints backed by SQLite
 app.get('/tasks', (req, res) => {
-  res.json(tasks);
+  const tasks = db.prepare('SELECT * FROM tasks').all();
+  res.json(tasks.map(formatTask));
 });
 
 app.get('/tasks/:id', (req, res) => {
-  const task = tasks.find(t => t.id === parseInt(req.params.id));
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
   if (!task) {
-    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    return res.status(404).json({ error: 'Task not found' });
   }
-  res.json(task);
+  res.json(formatTask(task));
 });
+
+// Remaining endpoints from Assignment 1 for now
+let tasks = [];
+let nextId = 4;
 
 app.post('/tasks', (req, res) => {
   const { title } = req.body;
@@ -74,7 +79,7 @@ app.post('/tasks', (req, res) => {
 app.put('/tasks/:id', (req, res) => {
   const task = tasks.find(t => t.id === parseInt(req.params.id));
   if (!task) {
-    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    return res.status(404).json({ error: 'Task not found' });
   }
   const { title, done } = req.body;
   if (title !== undefined) {
@@ -92,7 +97,7 @@ app.put('/tasks/:id', (req, res) => {
 app.delete('/tasks/:id', (req, res) => {
   const index = tasks.findIndex(t => t.id === parseInt(req.params.id));
   if (index === -1) {
-    return res.status(404).json({ error: `Task ${req.params.id} not found` });
+    return res.status(404).json({ error: 'Task not found' });
   }
   tasks.splice(index, 1);
   res.status(204).send();
