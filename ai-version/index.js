@@ -1,96 +1,60 @@
 const express = require('express');
-const Database = require('better-sqlite3');
-const path = require('path');
+const { Pool } = require('pg');
+require('dotenv').config();
 
 const app = express();
 app.use(express.json());
 
-const db = new Database(path.join(__dirname, 'tasks.db'));
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
 
-// AI generated table creation
-db.exec(`
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done INTEGER DEFAULT 0
-  )
-`);
-
-// AI generated seed logic (no transaction used)
-const count = db.prepare('SELECT COUNT(*) as count FROM tasks').get().count;
-if (count === 0) {
-  const insert = db.prepare('INSERT INTO tasks (title, done) VALUES (?, ?)');
-  insert.run('Buy milk', 0);
-  insert.run('Walk the dog', 1);
-  insert.run('Learn Express', 0);
+async function init() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS tasks (
+      id SERIAL PRIMARY KEY,
+      title TEXT NOT NULL,
+      done BOOLEAN DEFAULT FALSE
+    )
+  `);
+  const res = await pool.query('SELECT COUNT(*) FROM tasks');
+  if (parseInt(res.rows[0].count) === 0) {
+    await pool.query("INSERT INTO tasks (title, done) VALUES ('Buy milk', false), ('Walk the dog', true), ('Learn Express', false)");
+  }
 }
 
-app.get('/', (req, res) => {
-  res.json({ name: 'Task API', version: '1.0' });
-});
-
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok' });
-});
-
-// GET /tasks: returns raw DB rows without mapping done to boolean
-app.get('/tasks', (req, res) => {
-  const rows = db.prepare('SELECT * FROM tasks').all();
+app.get('/tasks', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM tasks ORDER BY id ASC');
   res.json(rows);
 });
 
-// GET /tasks/:id
-app.get('/tasks/:id', (req, res) => {
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!row) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
-  res.json(row);
+app.get('/tasks/:id', async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM tasks WHERE id = $1', [req.params.id]);
+  if (rows.length === 0) return res.status(404).json({ error: 'Task not found' });
+  res.json(rows[0]);
 });
 
-// POST /tasks
-app.post('/tasks', (req, res) => {
+app.post('/tasks', async (req, res) => {
   const { title } = req.body;
-  if (!title || typeof title !== 'string' || !title.trim()) {
-    return res.status(400).json({ error: 'Title is required' });
-  }
-  const result = db.prepare('INSERT INTO tasks (title, done) VALUES (?, 0)').run(title.trim());
-  const newTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(result.lastInsertRowid);
-  res.status(201).json(newTask);
+  if (!title || !title.trim()) return res.status(400).json({ error: 'Title is required' });
+  const { rows } = await pool.query('INSERT INTO tasks (title, done) VALUES ($1, false) RETURNING *', [title.trim()]);
+  res.status(201).json(rows[0]);
 });
 
-// PUT /tasks/:id
-app.put('/tasks/:id', (req, res) => {
-  const task = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  if (!task) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
+app.put('/tasks/:id', async (req, res) => {
   const { title, done } = req.body;
-  if (title === undefined && done === undefined) {
-    return res.status(400).json({ error: 'Invalid body' });
-  }
-
-  const updatedTitle = title !== undefined ? title : task.title;
-  const updatedDone = done !== undefined ? (done ? 1 : 0) : task.done;
-
-  db.prepare('UPDATE tasks SET title = ?, done = ? WHERE id = ?').run(updatedTitle, updatedDone, req.params.id);
-  const updated = db.prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
-  res.json(updated);
+  const { rows } = await pool.query('UPDATE tasks SET title = COALESCE($1, title), done = COALESCE($2, done) WHERE id = $3 RETURNING *', [title, done, req.params.id]);
+  if (rows.length === 0) return res.status(404).json({ error: 'Task not found' });
+  res.json(rows[0]);
 });
 
-// DELETE /tasks/:id
-app.delete('/tasks/:id', (req, res) => {
-  const info = db.prepare('DELETE FROM tasks WHERE id = ?').run(req.params.id);
-  if (info.changes === 0) {
-    return res.status(404).json({ error: 'Task not found' });
-  }
+app.delete('/tasks/:id', async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM tasks WHERE id = $1', [req.params.id]);
+  if (rowCount === 0) return res.status(404).json({ error: 'Task not found' });
   res.status(204).send();
 });
 
-if (require.main === module) {
-  app.listen(3000, () => {
-    console.log('AI version running on port 3000');
-  });
-}
-
-module.exports = { app, db };
+const PORT = process.env.PORT || 3000;
+init().then(() => {
+  app.listen(PORT, () => console.log(`AI version running on port ${PORT}`));
+}).catch(console.error);

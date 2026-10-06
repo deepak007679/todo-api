@@ -220,3 +220,48 @@ app.get('/tasks/:id', async (req, res, next) => {
 ```
 
 All SQL statements, connection pooling, and driver-specific syntax reside strictly in `repository.js`. Swapping storage engines touches **only** the repository module.
+
+---
+
+## 🤖 Stage 6: The AI Rematch ("AI vs Me")
+
+In Stage 6, we quarantined an AI-generated solution in `ai-version/` and conducted a rigorous code review against our hand-built stack.
+
+### 1. Full Prompt Given to the AI
+```text
+Containerize our Node.js Express Task CRUD API onto PostgreSQL using Docker and Docker Compose.
+
+Requirements:
+1. Use Node.js with Express and the 'pg' (node-postgres) driver.
+2. Connect to PostgreSQL using DATABASE_URL loaded from environment variables (.env), never hardcoding credentials.
+3. Create the 'tasks' table if it does not exist with columns: id (SERIAL PRIMARY KEY), title (TEXT NOT NULL), done (BOOLEAN NOT NULL DEFAULT FALSE).
+4. Seed 3 example tasks ('Buy milk', 'Walk the dog', 'Learn Express') only if the table is currently empty.
+5. Provide all 5 CRUD endpoints preserving identical behavior:
+   - GET /tasks: list all tasks
+   - GET /tasks/:id: return task or 404 { error: 'Task not found' }
+   - POST /tasks: validate title (400 if missing), insert task returning 201
+   - PUT /tasks/:id: update title/done, return 200, or 404 if not found
+   - DELETE /tasks/:id: delete task, return 204, or 404 if not found
+6. Always use parameterized query placeholders ($1, $2) to avoid SQL injection.
+7. Provide a Dockerfile and compose.yaml so that 'docker compose up' starts both the database and the API together with data persistence via a named volume.
+```
+
+### 2. Concrete Differences Found (`git diff --no-index . ai-version`)
+
+| Dimension | Our Hand-Built Solution | AI-Generated Quarantined Version | Review Verdict |
+|---|---|---|---|
+| **Architecture & Layering** | Clean separation of concerns: `repository.js` isolates DB logic from `index.js`. | Monolithic: raw `pool.query()` embedded directly in route callbacks. | **Our version won:** Swapping storage in our app touches 1 file; in AI's version it requires rewriting routes. |
+| **Startup Race Conditions** | `compose.yaml` uses `depends_on: { db: { condition: service_healthy } }` with `pg_isready`. | Naive `depends_on: [postgres]`, which only waits for container start, not DB readiness. | **Our version won:** AI version crashes on cold boot if Node starts before Postgres finishes initializing. |
+| **Image Optimization** | Pinned `node:20-alpine` (~140MB) and `postgres:16-alpine` (~85MB). | Bulky `FROM node:18` (~1GB) and `postgres:latest` (~450MB). | **Our version won:** AI version wastes 1.2GB disk and bandwidth. |
+| **Secret Management** | Strictly environment-driven via `.env.example` and runtime interpolation. | Hardcoded `password` directly in `compose.yaml` environment blocks. | **Our version won:** Leaked plaintext password in Compose specification. |
+
+### 3. What Did the Prompt Forget to Specify?
+1. **Container Startup Synchronization:** Failed to explicitly demand Docker healthchecks (`pg_isready`), allowing the AI to use naive `depends_on`.
+2. **Alpine Base Images:** Did not specify slim/alpine tags, prompting the AI to default to full Debian images.
+3. **Repository Pattern:** Did not instruct the AI to isolate SQL queries in a repository module, leading to route coupling.
+
+### 4. The Rematch: Improved Prompt & Outcome
+- **Improved Prompt:**
+  *"Containerize the Express Task API onto PostgreSQL using Docker Compose. Enforce clean architecture by keeping all SQL in repository.js. Use node:20-alpine and postgres:16-alpine. In compose.yaml, gate the API startup on a postgres healthcheck (pg_isready) to eliminate startup race conditions."*
+- **Outcome Delta:**
+  The regenerated AI output immediately adopted Alpine base images, created a dedicated database module, and configured a `service_healthy` condition in Docker Compose, matching our production criteria.
