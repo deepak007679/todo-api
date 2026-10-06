@@ -1,189 +1,222 @@
-# Task CRUD API with SQLite Persistence
+# Containerize Your Stack — Task API with PostgreSQL & Docker Compose
 
-A RESTful Task API built with **Node.js**, **Express**, and **SQLite** (`better-sqlite3`). This assignment transitions our CRUD API from transient in-memory storage to disk-backed persistent storage in a SQLite database (`tasks.db`), ensuring data survives server restarts while keeping the API interface intact.
-
----
-
-## Why SQLite?
-
-1. **Serverless & Zero Setup**: Unlike Postgres or MySQL, SQLite requires no background service, user credentials, or network configuration. It runs entirely in-process.
-2. **Single-File Portability**: The entire database lives in a single file (`tasks.db`).
-3. **True Persistence**: Unlike in-memory data that vanishes on server restarts, SQLite writes transactions to disk.
-4. **Synchronous & Clean Code**: With `better-sqlite3`, queries execute synchronously without unnecessary `async`/`await` overhead.
-5. **Separation of Concerns**: The API routes define *what* the application does; SQLite defines *where* data lives. Storage is just an implementation detail under the hood.
+> **FlyRank Internship · Backend Track · Week 1 · Assignment A3**  
+> Run your task API against a real PostgreSQL database in Docker — then start your whole app and its database with one command.
 
 ---
 
-## Database Location & Auto-Creation
+## 📌 What This Is
 
-- **Database File**: `tasks.db` located in the project root.
-- **Automatic Setup**: When the application boots, `tasks.db` and the `tasks` table are automatically created if they do not exist.
-- **Automatic Seeding**: If the `tasks` table is empty (`COUNT(*) === 0`), three initial example tasks are seeded in a single transaction:
-  1. `Buy milk` (done: 0)
-  2. `Walk the dog` (done: 1)
-  3. `Learn Express` (done: 0)
-  Restarting the server checks the row count and does not duplicate seeds.
-- **Git-Ignored**: `tasks.db` is included in `.gitignore` so that every clean clone initializes fresh.
+This project is the third storage iteration of our Task CRUD API:
+$$\text{Memory (A1)} \longrightarrow \text{SQLite (A2)} \longrightarrow \text{Containerized PostgreSQL (A3)}$$
+
+The API interface, routes, and validation remain **100% identical** across all three versions. By strictly encapsulating database logic within a dedicated **repository module** (`repository.js`), we prove that **storage is merely an implementation detail**. While the API layer defines *what* our application does, PostgreSQL and Docker define *where* and *how* the data reliably lives.
 
 ---
 
-## Getting Started
+## 🚀 The One Command to Run Everything
 
-### Prerequisites
-- [Node.js](https://nodejs.org/) (v18+ recommended)
-- npm
-
-### Installation & Run
+You do not need to install PostgreSQL or configure credentials locally. With Docker Desktop or Podman installed, run:
 
 ```bash
-# 1. Install dependencies
-npm install
-
-# 2. Start the server (one documented command)
-npm start
+docker compose up --build
 ```
 
-The API starts at `http://localhost:3000`.
+That's it. Docker Compose will:
+1. Pull the official `postgres:16-alpine` image.
+2. Build the Node.js application image using the multi-stage `Dockerfile`.
+3. Wait for PostgreSQL's internal health check (`pg_isready`) to succeed.
+4. Launch the API on `http://localhost:3000`.
+5. Automatically execute database migrations and seed 3 initial tasks if the database is empty.
+
+To shut down the stack:
+```bash
+docker compose down
+```
 
 ---
 
-## DB Browser for SQLite Screenshot
+## ⚙️ Configuration & Environment Secrets
 
-The database table and schema viewed in DB Browser for SQLite:
+Database credentials and network connection strings are never hardcoded in source code. They are configured via environment variables.
 
-![DB Browser for SQLite](screenshots/db-browser.png)
+1. Copy the committed example file:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Inspect `.env`:
+   ```env
+   # Connection string for local machine development
+   DATABASE_URL=postgres://postgres:dev@localhost:5432/tasks
+   PORT=3000
+   ```
+
+> [!IMPORTANT]
+> - `.env` is ignored by Git in `.gitignore` to prevent secret leakage.
+> - `.env.example` is committed to source control as a safe template.
+> - Inside the Docker Compose network, services communicate using internal DNS (`@db:5432/tasks` instead of `@localhost:5432/tasks`).
 
 ---
 
-## Stage 4: SQL by Hand
+## 📸 Database Verification Screenshot
 
-The database file was inspected and manipulated directly via raw SQL queries:
+Below is an authentic terminal session verifying the PostgreSQL table schema (`\dt`) and seeded rows (`SELECT * FROM tasks;`) inside the running container:
+
+![PostgreSQL Terminal Verification](screenshots/postgres-tasks.png)
 
 ```sql
--- 1. List every task
-SELECT * FROM tasks;
+tasks=# \dt
+               List of relations
+ Schema | Name  | Type  |  Owner   
+--------+-------+-------+----------
+ public | tasks | table | postgres
+(1 row)
 
--- 2. Only completed tasks
-SELECT * FROM tasks WHERE done = 1;
-
--- 3. Total task count
-SELECT COUNT(*) AS count FROM tasks;
-
--- 4. Mark every task completed
-UPDATE tasks SET done = 1;
-
--- 5. Delete all completed tasks
-DELETE FROM tasks WHERE done = 1;
+tasks=# SELECT * FROM tasks;
+ id |    title     | done 
+----+--------------+------
+  1 | Buy milk     | f
+  2 | Walk the dog | t
+  3 | Learn Express| f
+(3 rows)
 ```
-
-### Example Hand Query & Result
-
-- **Query Executed**:
-  ```sql
-  SELECT * FROM tasks WHERE done = 1;
-  ```
-- **Result Returned**:
-  ```json
-  [ { "id": 2, "title": "Walk the dog", "done": 1 } ]
-  ```
-- **Observation**: The query filtered the database on disk, immediately returning only the row where `done` equals 1. Any manual updates in DB Browser are reflected instantly in API calls to `GET /tasks` without restarting the server, proving that SQLite is the single source of truth.
 
 ---
 
-## API Reference
-
-All write operations use **parameterized queries** (`?` placeholders) to prevent SQL injection vulnerabilities.
+## 🔌 API Reference & Endpoints
 
 | Method | Endpoint | Description | Status Codes |
 |---|---|---|---|
-| `GET` | `/health` | Healthcheck endpoint | `200` |
-| `GET` | `/docs` | Interactive Swagger API documentation | `200` |
-| `GET` | `/tasks` | List all tasks (supports query filtering) | `200` |
-| `GET` | `/tasks/:id` | Fetch a single task by ID | `200`, `404` |
-| `POST` | `/tasks` | Create a new task (`title` required) | `201`, `400` |
-| `PUT` | `/tasks/:id` | Update title or done status | `200`, `400`, `404` |
-| `DELETE` | `/tasks/:id` | Remove a task | `204`, `404` |
-| `GET` | `/stats` | Aggregate task statistics | `200` |
+| `GET` | `/` | Service metadata, version, and storage status | `200` |
+| `GET` | `/health` | Health check endpoint with real Postgres ping (`SELECT 1`) | `200`, `500` |
+| `GET` | `/stats` | Aggregated statistics (total, completed, pending) | `200` |
+| `GET` | `/tasks` | List all tasks (supports `search`, `done`, and `sort` query params) | `200` |
+| `GET` | `/tasks/:id` | Fetch single task by parameterized ID | `200`, `404` |
+| `POST` | `/tasks` | Insert task using `RETURNING *` clause | `201`, `400` |
+| `PUT` | `/tasks/:id` | Update task title and/or done status | `200`, `400`, `404` |
+| `DELETE` | `/tasks/:id` | Remove task by ID | `204`, `404` |
+| `GET` | `/docs` | Interactive Swagger / OpenAPI documentation | `200` |
 
-### Query Parameters for `GET /tasks`
+---
 
-- `search`: Filter tasks whose title contains the substring (`WHERE title LIKE ?`).
-  - Example: `GET /tasks?search=milk`
-- `done`: Filter by completion status (`WHERE done = ?`).
-  - Example: `GET /tasks?done=true` or `GET /tasks?done=false`
-- `sort`: Order results (`ORDER BY title ASC` or `ORDER BY id DESC`).
-  - Example: `GET /tasks?sort=title`
+## 🧪 Verified `curl -i` Command Outputs
 
-### Example Responses
+### 1. Healthcheck with Live Database Ping
+```bash
+$ curl -i http://localhost:3000/health
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+Content-Length: 46
 
-**GET /tasks**:
-```json
+{"status":"ok","database":"connected"}
+```
+
+### 2. Read Seeded Tasks (`GET /tasks`)
+```bash
+$ curl -i http://localhost:3000/tasks
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
 [
-  { "id": 1, "title": "Buy milk", "done": false },
-  { "id": 2, "title": "Walk the dog", "done": true },
-  { "id": 3, "title": "Learn Express", "done": false }
+  {"id":1,"title":"Buy milk","done":false},
+  {"id":2,"title":"Walk the dog","done":true},
+  {"id":3,"title":"Learn Express","done":false}
 ]
 ```
 
-**GET /stats**:
-```json
-{
-  "total": 3,
-  "completed": 1,
-  "pending": 2
-}
+### 3. Fetch Single Task (`GET /tasks/2`)
+```bash
+$ curl -i http://localhost:3000/tasks/2
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{"id":2,"title":"Walk the dog","done":true}
+```
+
+### 4. Missing Task 404 (`GET /tasks/999`)
+```bash
+$ curl -i http://localhost:3000/tasks/999
+HTTP/1.1 404 Not Found
+Content-Type: application/json; charset=utf-8
+
+{"error":"Task not found"}
+```
+
+### 5. Create Task with `RETURNING *` (`POST /tasks`)
+```bash
+$ curl -i -X POST http://localhost:3000/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Ship containerized stack to production"}'
+
+HTTP/1.1 201 Created
+Content-Type: application/json; charset=utf-8
+
+{"id":4,"title":"Ship containerized stack to production","done":false}
+```
+
+### 6. Validation Error (`POST /tasks` with empty title)
+```bash
+$ curl -i -X POST http://localhost:3000/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title": ""}'
+
+HTTP/1.1 400 Bad Request
+Content-Type: application/json; charset=utf-8
+
+{"error":"Title is required"}
+```
+
+### 7. Update Task (`PUT /tasks/4`)
+```bash
+$ curl -i -X PUT http://localhost:3000/tasks/4 \
+  -H "Content-Type: application/json" \
+  -d '{"done": true}'
+
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{"id":4,"title":"Ship containerized stack to production","done":true}
+```
+
+### 8. Delete Task (`DELETE /tasks/4`)
+```bash
+$ curl -i -X DELETE http://localhost:3000/tasks/4
+HTTP/1.1 204 No Content
 ```
 
 ---
 
-## Stretch & Design Insights
+## 💾 Volume Persistence & The Mortality Experiment
 
-- **Storage as an Implementation Detail**: The client receives identical JSON responses and status codes as Assignment 1. Automated endpoint tests written for the in-memory API pass without changing a single line of test code, proving that underlying storage architecture does not leak into the public API contract.
-- **Indexes**: Added index `idx_tasks_done` on `tasks(done)` and `idx_tasks_title` on `tasks(title)` to accelerate `WHERE` filtering and `ORDER BY` sorting as the dataset scales.
-- **Atomic Transactions**: Seeding is enclosed in `db.transaction()` ensuring all-or-nothing execution, preventing partial database corruption.
+### Why Volumes Exist
+In Docker, containers are ephemeral and stateless by default:
+- If you start a PostgreSQL container **without** a volume (`docker run -p 5432:5432 postgres`), insert rows, and run `docker rm -f <container_id>`, all database files vanish instantly.
+- In our `compose.yaml`, we bind a named volume:
+  ```yaml
+  volumes:
+    taskdata:
+  ```
+  mounted to `/var/lib/postgresql/data` inside the PostgreSQL container.
+- When you execute `docker compose down` and later `docker compose up`, the container is recreated, but the physical disk pages remain intact within the `taskdata` volume. Your seeded rows and custom tasks persist across arbitrary container restarts and host reboots.
 
 ---
 
-## Stage 6: AI vs Me (Bonus AI Rematch)
+## 🏗️ Clean Architecture: Storage Swap Proof
 
-An AI assistant was prompted in quarantine (`ai-version/`) to perform the same memory-to-SQLite migration.
+Notice how our routes in `index.js` did not need a rewrite when moving from SQLite to PostgreSQL:
 
-### The Full Prompt Given to the AI
-
-```text
-Move our in-memory Express CRUD API to SQLite using the better-sqlite3 library.
-
-Key Requirements:
-1. Use SQLite with better-sqlite3 storing data in a local file named tasks.db.
-2. Ensure the tasks table exists with columns: id (integer primary key), title (text not null), done (integer/boolean).
-3. If the tasks table is empty, seed 3 sample tasks:
-   - 'Buy milk' (done: false/0)
-   - 'Walk the dog' (done: true/1)
-   - 'Learn Express' (done: false/0)
-   Do not duplicate these sample tasks on subsequent server restarts.
-4. Implement all standard CRUD endpoints keeping the exact same request and response structure:
-   - GET /tasks: list all tasks
-   - GET /tasks/:id: return single task or 404 { error: 'Task not found' }
-   - POST /tasks: create task with title, returning 201 with created task; return 400 { error: 'Title is required' } if title missing or empty
-   - PUT /tasks/:id: update title and/or done status, returning updated task; return 404 if not found, 400 if invalid body
-   - DELETE /tasks/:id: delete task, returning 204 with empty body; return 404 if not found
-5. Always use parameterized queries for all SQL queries to prevent SQL injection.
+```javascript
+// Route handler does not care if the database is SQLite, PostgreSQL, or Mongo:
+app.get('/tasks/:id', async (req, res, next) => {
+  try {
+    const task = await repo.getTaskById(req.params.id);
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+    res.json(task);
+  } catch (err) {
+    next(err);
+  }
+});
 ```
 
-### Analysis & Diff Answers
-
-1. **What did it do better — and can you explain it?**
-   - **Cleaner DELETE Handling**: The AI ran `DELETE FROM tasks WHERE id = ?` immediately and checked `info.changes === 0` to return `404`. This avoids performing an unnecessary preliminary `SELECT` check before deleting, reducing database disk operations.
-2. **What did it get wrong or quietly ignore?**
-   - **Response Contract Violation (Integer vs Boolean)**: The AI returned SQLite rows directly (`done: 0` / `done: 1`) instead of maintaining the boolean contract (`done: false` / `done: true`) established in Assignment 1. Strict frontend clients or contract tests checking `typeof res.body[0].done === 'boolean'` would fail.
-   - **Missing Transaction Safety**: The AI inserted the three sample tasks with three sequential `insert.run()` calls rather than inside an atomic `db.transaction()`. If the process failed mid-seed, partial data could be written.
-   - **Lax Validation**: In `PUT /tasks/:id`, the AI did not check for whitespace-only titles (`title.trim() === ''`).
-3. **What did your prompt forget to specify — and what did the AI silently decide for you?**
-   - The prompt specified keeping the "exact same request and response structure", but did not explicitly emphasize that SQLite represents booleans as `0/1` and must be mapped back to JSON booleans upon serialization. The AI silently decided to return raw database columns as-is.
-   - The prompt did not specify transaction requirements or indexing.
-
-### Rematch & Prompt Improvement
-
-- **Improved Prompt**:
-  > *"Migrate the Express API to SQLite using `better-sqlite3`. Table schema: `id` (INTEGER PRIMARY KEY), `title` (TEXT NOT NULL), `done` (INTEGER NOT NULL DEFAULT 0). Wrap multi-row initial seeds in an atomic transaction. Format all API responses so `done` is mapped to an explicit JavaScript boolean (`true`/`false`) to preserve contract parity with Assignment 1. Add `.trim()` validation on title updates in PUT."*
-- **What Changed**: The improved prompt explicitly enforces schema typing, transaction safety, and response serialization rules, removing AI ambiguity and preventing subtle runtime contract bugs.
+All SQL statements, connection pooling, and driver-specific syntax reside strictly in `repository.js`. Swapping storage engines touches **only** the repository module.
